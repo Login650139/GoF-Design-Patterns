@@ -5,15 +5,29 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Выберите ОС для сборки'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - windows-latest
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        os: ${{ (github.event_name == 'workflow_dispatch' && fromJSON(format('[["{0}"]]', github.event.inputs.os))) || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y cmake build-essential
 
     - name: Configure and Build
@@ -24,31 +38,16 @@ jobs:
 
     - name: Test
       working-directory: Creational/Singleton
-      run: ctest --test-dir build --output-on-failure
+      run: ctest --test-dir build --output-on-failure -C Release
 
-    - name: Package DEB
+    - name: Package DEB (Linux only)
+      if: runner.os == 'Linux'
       working-directory: Creational/Singleton
       run: cd build && cpack -G DEB
 
-    - name: Upload Release Asset
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Upload Release Asset (Linux only, only on tag)
+      if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
       uses: softprops/action-gh-release@v1
       with:
         files: Creational/Singleton/build/*.deb
         token: ${{ secrets.GITHUB_TOKEN }}
-
-  build-windows:
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Configure and Build
-      working-directory: Creational/Singleton
-      run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=Release
-        cmake --build build --config Release
-
-    - name: Test
-      working-directory: Creational/Singleton
-      run: ctest --test-dir build --output-on-failure -C Release
