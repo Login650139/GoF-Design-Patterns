@@ -2,12 +2,10 @@ name: Build, Test, and Release
 
 on:
   push:
-    branches: [ master ]          # ← вернули автозапуск при пуше в master
+    branches: [ master ]
+    tags: [ 'v*' ]
   pull_request:
-    branches: [ master ]          # ← автозапуск при PR
-  push:
-    tags:
-      - 'v*'                      # ← релиз по тегу
+    branches: [ master ]
   workflow_dispatch:
     inputs:
       os:
