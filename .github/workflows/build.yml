@@ -15,7 +15,7 @@ on:
           - ubuntu-latest
           - windows-latest
       release_tag:
-        description: 'Тег для релиза (оставьте пустым для авто-генерации)'
+        description: 
         required: false
         default: ''
         type: string
