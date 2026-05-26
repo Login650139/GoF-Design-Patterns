@@ -1,10 +1,9 @@
-name: Build, Test, and Package
+name: Build, Test, and Release
 
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    tags:
+      - 'v*'               # запускается при пуше тега вида v1.0.0
   workflow_dispatch:
     inputs:
       os:
@@ -15,11 +14,17 @@ on:
         options:
           - ubuntu-latest
           - windows-latest
+      release_tag:
+        description: 'Тег для релиза (оставьте пустым для авто-генерации)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build:
     strategy:
       matrix:
+        # Если ручной запуск — только выбранная ОС, иначе обе
         os: ${{ (github.event_name == 'workflow_dispatch' && fromJSON(format('[["{0}"]]', github.event.inputs.os))) || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
 
@@ -40,14 +45,68 @@ jobs:
       working-directory: Creational/Singleton
       run: ctest --test-dir build --output-on-failure -C Release
 
-    - name: Package DEB (Linux only)
+    # Сборка deb (только Linux)
+    - name: Package DEB
       if: runner.os == 'Linux'
       working-directory: Creational/Singleton
       run: cd build && cpack -G DEB
 
-    - name: Upload Release Asset (Linux only, only on tag)
-      if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+    # Сборка zip архива с exe (только Windows)
+    - name: Package ZIP (Windows)
+      if: runner.os == 'Windows'
+      working-directory: Creational/Singleton
+      run: |
+        mkdir artifact
+        cp build/Release/singleton.exe artifact/ 2>/dev/null || true
+        cp build/Release/test_singleton.exe artifact/ 2>/dev/null || true
+        7z a artifact.zip ./artifact/*
+      shell: bash
+
+    # Загрузка артефактов для последующего использования
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ runner.os }}-artifacts
+        path: |
+          Creational/Singleton/build/*.deb
+          Creational/Singleton/artifact.zip
+
+    # Определение тега для релиза
+    - name: Set release tag
+      id: set_tag
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        elif [ -n "${{ github.event.inputs.release_tag }}" ]; then
+          echo "TAG=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "TAG=nightly-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
+  release:
+    needs: build
+    if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Display structure of downloaded files
+      run: ls -R artifacts
+
+    - name: Create Release
+      id: create_release
       uses: softprops/action-gh-release@v1
       with:
-        files: Creational/Singleton/build/*.deb
-        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_name: ${{ needs.build.outputs.set_tag.TAG || 'nightly' }}
+        name: Release ${{ needs.build.outputs.set_tag.TAG || 'nightly' }}
+        draft: false
+        prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+        files: |
+          artifacts/**/*.deb
+          artifacts/**/artifact.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
